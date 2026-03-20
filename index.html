@@ -378,6 +378,8 @@
         const [settlingDoc, setSettlingDoc] = useState(() => ({
           id: genReconcileId(),
           channel: "",
+          customerName: "",
+          uniformNo: "",
           issuer: "財務部 - 王大明",
           notifyEmail: "",
           purchaseTotal: 0,
@@ -838,7 +840,7 @@
         const [currentStep, setCurrentStep] = useState(1);
 
         return (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
             <div className="px-10 py-10 border-b border-gray-100">
               <div className="flex items-center justify-between max-w-4xl mx-auto">
                 <div
@@ -1051,8 +1053,62 @@
 
               const docType = normalizeDocType(get("單據類型", "docType", "DocType", "類型", "單據"));
               const docNo = String(get("單號", "docNo", "DocNo", "單據編號", "單據號") || "").trim();
-              const channelShort = String(get("通路商簡稱", "channelShort", "通路簡稱", "客戶簡稱") || "").trim();
-              const channelFull = String(get("通路商", "channel", "通路商全名", "客戶", "客戶名稱") || "").trim();
+              const channelShort = String(
+                get(
+                  "通路商簡稱",
+                  "channelShort",
+                  "通路簡稱",
+                  "客戶簡稱",
+                  "經銷商簡稱",
+                  "dealerShort",
+                  "經銷商代碼",
+                  "dealerCode"
+                ) || ""
+              ).trim();
+
+              // 經銷商欄位可能同時包含「經銷商-客戶名稱」(例如：經銷商-凱思國際貿易有限公司)
+              // 這裡規則：經銷商 = 整段；客戶名稱 = 以第一個 '-' 分割後的尾端（若客戶名稱欄位沒填）
+              const dealerRaw = String(get("經銷商", "dealer", "經銷商名稱", "dealerName") || "").trim();
+              const firstHyphenIdx = dealerRaw.search(/[-–—]/);
+              const parsedCustomerFromDealer =
+                firstHyphenIdx >= 0 ? dealerRaw.slice(firstHyphenIdx + 1).trim() : "";
+
+              const channelFullRaw = String(
+                get(
+                  "通路商",
+                  "channel",
+                  "通路商全名",
+                  "客戶",
+                  "客戶名稱",
+                  "經銷商",
+                  "dealer",
+                  "經銷商名稱",
+                  "dealerName"
+                ) || ""
+              ).trim();
+
+              const channelFull = dealerRaw || channelFullRaw;
+
+              let customerName = String(
+                get(
+                  "客戶名稱",
+                  "CustomerName",
+                  "Customer Name",
+                  "客戶",
+                  "customerName",
+                  "客戶(名稱)",
+                  "公司名稱"
+                ) || ""
+              ).trim();
+
+              if (!customerName && parsedCustomerFromDealer) {
+                customerName = parsedCustomerFromDealer;
+              }
+              const uniformNo = String(
+                get("統一編號", "統編", "統編(稅務)", "統編(稅)", "統編(Tax)", "TaxId", "taxId", "VAT", "VATNumber", "VAT(稅)")
+              ).trim();
+              const finalChannelShort = channelShort || channelFull;
+              const finalChannelFull = channelFull || channelShort;
               const shipDate = get("實際出貨日期", "shipDate", "出貨日期", "實際出貨日");
               const inDate = get("實際入庫日期", "inDate", "入庫日期", "實際入庫日");
               const sku = String(get("sku(品號)", "SKU", "sku", "品號", "料號") || "").trim();
@@ -1073,8 +1129,10 @@
               return {
                 docType: docType || "",
                 docNo,
-                channelShort,
-                channelFull,
+                channelShort: finalChannelShort,
+                channelFull: finalChannelFull,
+                customerName,
+                uniformNo,
                 shipDate: shipDateISO ? shipDateISO.replaceAll("-", "/") : String(shipDate || "").trim(),
                 inDate: inDateISO ? inDateISO.replaceAll("-", "/") : String(inDate || "").trim(),
                 shipDateISO,
@@ -1306,7 +1364,7 @@
               </div>
 
               <div className="lg:col-span-2">
-                <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white">
                   <div className="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <Icon name="table" className="w-4 h-4" />
@@ -1316,8 +1374,8 @@
                       顯示 {filteredRaw.length} 筆（原始共 {importState.rawLines?.length || 0} 筆）
                     </div>
                   </div>
-                  <div className="overflow-auto max-h-[520px]">
-                    <table className="w-full text-left text-sm">
+                  <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
+                    <table className="w-max min-w-[1100px] text-left text-sm">
                       <thead className="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                         <tr>
                           <th className="px-4 py-3 font-medium">單據類型</th>
@@ -1328,7 +1386,7 @@
                           <th className="px-4 py-3 font-medium">SKU</th>
                           <th className="px-4 py-3 font-medium">商品名稱</th>
                           <th className="px-4 py-3 font-medium">單價</th>
-                          <th className="px-4 py-3 font-medium">原始數量</th>
+                          <th className="px-4 py-3 font-medium">實際數量</th>
                           <th className="px-4 py-3 font-medium">剩餘可結</th>
                           <th className="px-4 py-3 font-medium">小計金額</th>
                         </tr>
@@ -1569,7 +1627,7 @@
             <div className="space-y-4 mb-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="border border-gray-200 rounded-xl p-4 bg-white">
-                <div className="text-xs text-gray-500">通路商（下拉）</div>
+                <div className="text-xs text-gray-500">經銷商</div>
                 <select
                   value={draft.channelShort}
                   onChange={(e) =>
@@ -1730,17 +1788,14 @@
               </div>
             )}
 
-            <div className="border border-gray-200 rounded-xl overflow-hidden mb-8 bg-white">
+            <div className="border border-gray-200 rounded-xl overflow-x-auto mb-8 bg-white">
               <div className="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <Icon name="list-checks" className="w-4 h-4" />
                   <span>
-                    勾選要結算的單據（{importState.selectedIds?.length || 0} / {filteredRows.length}）
+                    勾選要結算的單據
                   </span>
-                  <span className="text-xs text-gray-500">
-                    已勾選：出貨 {typeCounts.selected.ship} / 退貨 {typeCounts.selected.ret}　
-                    篩選後：出貨 {typeCounts.filtered.ship} / 退貨 {typeCounts.filtered.ret}
-                  </span>
+                  
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                   <button
@@ -1772,21 +1827,21 @@
                   </button>
                 </div>
               </div>
-              <div className="overflow-auto max-h-[520px]">
-              <table className="w-full text-left text-sm">
+              <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
+              <table className="w-max min-w-[1150px] text-left text-sm">
                   <thead className="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                     <tr>
                       <th className="px-4 py-3 font-medium">勾選</th>
                       <th className="px-4 py-3 font-medium">狀態</th>
                       <th className="px-4 py-3 font-medium">單據類型</th>
                       <th className="px-4 py-3 font-medium">單號</th>
-                      <th className="px-4 py-3 font-medium">通路商簡稱</th>
+                      <th className="px-4 py-3 font-medium">經銷商</th>
                       <th className="px-4 py-3 font-medium">出貨日</th>
                       <th className="px-4 py-3 font-medium">入庫日</th>
                       <th className="px-4 py-3 font-medium">SKU</th>
                       <th className="px-4 py-3 font-medium">商品名稱</th>
                       <th className="px-4 py-3 font-medium">單價</th>
-                      <th className="px-4 py-3 font-medium">原始數量</th>
+                      <th className="px-4 py-3 font-medium">實際數量</th>
                       <th className="px-4 py-3 font-medium">剩餘可結</th>
                       <th className="px-4 py-3 font-medium">小計金額</th>
                   </tr>
@@ -1900,11 +1955,15 @@
                   const shipStart = importState.filter?.shipStart || "";
                   const shipEnd = importState.filter?.shipEnd || "";
                   const channel = importState.filter?.channelShort || (selectedRows?.[0]?.channelShort || "");
+                  const customerName = selectedRows?.[0]?.customerName || "";
+                  const uniformNo = selectedRows?.[0]?.uniformNo || "";
                   const shipAmount = st.reduce((acc, r) => acc + safeNumber(r.shipAmount), 0);
                   const returnAmount = st.reduce((acc, r) => acc + safeNumber(r.returnAmount), 0);
                   setSettlingDoc((prev) => ({
                     ...prev,
                     channel,
+                    customerName,
+                    uniformNo,
                     purchaseTotal: shipAmount,
                     returnTotal: returnAmount,
                     periodStart: shipStart,
@@ -1916,7 +1975,7 @@
                 disabled={!canProceed}
                 className="flex items-center gap-2 px-6 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shadow-sm font-medium"
               >
-                下一步：SKU 小計確認
+                下一步：小計確認
                 <Icon name="chevron-right" className="w-4 h-4" />
               </button>
             </div>
@@ -2097,32 +2156,32 @@
         return (
           <div className="animate-in fade-in slide-in-from-right-4 duration-300">
             <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
-              3. SKU 小計確認 → 模擬開立發票
+              3. 確認明細小計
             </h2>
 
-            <div className="border border-gray-200 rounded-xl overflow-hidden mb-8 bg-white">
+            <div className="border border-gray-200 rounded-xl overflow-x-auto mb-8 bg-white">
               <div className="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <Icon name="calculator" className="w-4 h-4" />
-                  小計明細（出貨/退貨可編輯「本次結算數量」≤ 剩餘可結；單價可調整）
+                  小計明細
                 </div>
                 <div className="text-xs text-gray-500">
                   {importState.confirmed ? "已確認（鎖定）" : "未確認（可編輯）"}
                 </div>
               </div>
-              <div className="overflow-auto max-h-[520px]">
-                <table className="w-full text-left text-sm">
+              <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
+                <table className="w-max min-w-[1200px] text-left text-sm">
                   <thead className="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                     <tr>
                       <th className="px-4 py-3 font-medium">單據類型</th>
                       <th className="px-4 py-3 font-medium">狀態</th>
                       <th className="px-4 py-3 font-medium">單號</th>
-                      <th className="px-4 py-3 font-medium">通路商簡稱</th>
+                      <th className="px-4 py-3 font-medium">經銷商</th>
                       <th className="px-4 py-3 font-medium">出貨日</th>
                       <th className="px-4 py-3 font-medium">入庫日</th>
                       <th className="px-4 py-3 font-medium">SKU</th>
                       <th className="px-4 py-3 font-medium">商品名稱</th>
-                      <th className="px-4 py-3 font-medium">原始數量</th>
+                      <th className="px-4 py-3 font-medium">實際數量</th>
                       <th className="px-4 py-3 font-medium">剩餘可結</th>
                       <th className="px-4 py-3 font-medium">單價</th>
                       <th className="px-4 py-3 font-medium">本次結算數量</th>
@@ -2290,7 +2349,7 @@
               <div className="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <Icon name="plus-square" className="w-4 h-4" />
-                  其他加減項（可新增多筆，金額可正可負）
+                  調整項目（可新增多筆，金額可正可負）
                 </div>
                 <div className="text-xs text-gray-500">
                   加減項合計：{" "}
@@ -2366,14 +2425,14 @@
 
                   {(settlingDoc.adjustments || []).length === 0 && (
                     <div className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
-                      尚未新增加減項（可選）
+                      尚未新增
                     </div>
                   )}
                 </div>
 
                 <div className="pt-4 flex items-center justify-between gap-3">
                   <div className="text-xs text-gray-500">
-                    規則：以淨額（扣款後）為基礎，再加上所有加減項 → 發票總額
+                    以淨額為基礎，再加上所有調整項目 → 發票總額
                   </div>
                   <button
                     onClick={() => {
@@ -2391,61 +2450,45 @@
               </div>
             </div>
 
-            <div className="border border-gray-200 rounded-lg overflow-hidden mb-8">
-              <table className="w-full text-left text-sm">
+            <div className="border border-gray-200 rounded-lg overflow-x-auto mb-8">
+              <table className="w-max min-w-[1200px] text-left text-sm">
                 <thead className="bg-gray-50 text-gray-500">
                   <tr>
-                    <th className="px-4 py-3 font-medium">對帳單編號</th>
-                    <th className="px-4 py-3 font-medium">通路商</th>
-                    <th className="px-4 py-3 font-medium text-blue-600">發票總額</th>
-                    <th className="px-4 py-3 font-medium">
-                      發票號碼 <span className="text-red-500">*</span>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">對帳單編號</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">經銷商</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">客戶名稱</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">統一編號</th>
+                    <th className="px-4 py-3 font-medium text-blue-600 whitespace-nowrap">發票總額</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">
+                      發票號碼
                     </th>
-                    <th className="px-4 py-3 font-medium">通知信箱（ezpay）</th>
-                    <th className="px-4 py-3 font-medium">發票日期</th>
-                    <th className="px-4 py-3 font-medium">開立人</th>
-                    <th className="px-4 py-3 font-medium">備註</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">備註</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">通知信箱（ezpay）</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">發票日期</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   <tr>
-                    <td className="px-4 py-4 text-gray-900">{settlingDoc.id}</td>
-                    <td className="px-4 py-4 text-gray-900">{settlingDoc.channel}</td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 text-gray-900 whitespace-nowrap">
+                      <div className="font-mono">{settlingDoc.id}</div>
+        
+                    </td>
+                    <td className="px-4 py-4 text-gray-900 whitespace-nowrap">{settlingDoc.channel}</td>
+                    <td className="px-4 py-4 text-gray-700 whitespace-nowrap">{settlingDoc.customerName || "-"}</td>
+                    <td className="px-4 py-4 text-gray-700 whitespace-nowrap">{settlingDoc.uniformNo || "-"}</td>
+                    <td className="px-4 py-4 whitespace-nowrap">
                       <div className="text-blue-600 font-semibold text-base">{formatMoney(invoiceTotal)}</div>
                       <div className="mt-1 text-xs text-gray-500">
                         淨額（扣款後）{formatMoney(netAfterDeduction)} {adjustmentsSum >= 0 ? "+" : "-"} 加減項
                         {formatMoney(Math.abs(adjustmentsSum))} = {formatMoney(invoiceTotal)}
                       </div>
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 whitespace-nowrap">
                       <div className="bg-gray-100 text-gray-400 italic px-3 py-1.5 rounded text-xs border border-gray-200 inline-block">
-                        (系統將自動配號)
+                        （待點擊「開立發票」後才會顯示）
                       </div>
                     </td>
-                    <td className="px-4 py-4">
-                      <input
-                        type="email"
-                        placeholder="name@example.com"
-                        value={settlingDoc.notifyEmail || ""}
-                        onChange={(e) =>
-                          setSettlingDoc((prev) => ({ ...prev, notifyEmail: e.target.value }))
-                        }
-                        className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-blue-500"
-                      />
-                    </td>
-                    <td className="px-4 py-4">
-                      <input
-                        type="date"
-                        value={settlingDoc.invoiceDate}
-                        onChange={(e) =>
-                          setSettlingDoc((prev) => ({ ...prev, invoiceDate: e.target.value }))
-                        }
-                        className="border border-gray-300 rounded px-2 py-1.5 text-sm w-36 focus:outline-none focus:border-blue-500"
-                      />
-                    </td>
-                    <td className="px-4 py-4 text-gray-600">{settlingDoc.issuer}</td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 whitespace-nowrap">
                       <input
                         type="text"
                         placeholder="備註..."
@@ -2454,6 +2497,29 @@
                           setSettlingDoc((prev) => ({ ...prev, note: e.target.value }))
                         }
                         className="border border-gray-300 rounded px-3 py-1.5 text-sm w-full focus:outline-none focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <input
+                        type="email"
+                        placeholder="name@example.com"
+                        required
+                        value={settlingDoc.notifyEmail || ""}
+                        onChange={(e) =>
+                          setSettlingDoc((prev) => ({ ...prev, notifyEmail: e.target.value }))
+                        }
+                        className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <input
+                        type="date"
+                        required
+                        value={settlingDoc.invoiceDate}
+                        onChange={(e) =>
+                          setSettlingDoc((prev) => ({ ...prev, invoiceDate: e.target.value }))
+                        }
+                        className="border border-gray-300 rounded px-2 py-1.5 text-sm w-36 focus:outline-none focus:border-blue-500"
                       />
                     </td>
                   </tr>
@@ -2549,10 +2615,10 @@
         };
 
         return (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-[calc(100vh-140px)]">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto flex flex-col h-[calc(100vh-140px)]">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-white">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">結算列表（草稿 / 已開立）</h2>
+                <h2 className="text-xl font-bold text-gray-800">結算列表</h2>
                 <p className="text-sm text-gray-500 mt-1">
                   此列表顯示已儲存草稿，以及已開立發票的對帳單紀錄。
                 </p>
@@ -2582,12 +2648,12 @@
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto">
-              <table className="w-full text-left text-sm">
+            <div className="flex-1 overflow-x-auto overflow-y-auto">
+              <table className="w-max min-w-[900px] text-left text-sm">
                 <thead className="bg-gray-50 text-gray-500 sticky top-0 z-10 shadow-sm">
                   <tr>
                     <th className="px-6 py-4 font-medium">對帳單編號</th>
-                    <th className="px-6 py-4 font-medium">通路商</th>
+                    <th className="px-6 py-4 font-medium">經銷商</th>
                     <th className="px-6 py-4 font-medium">發票總額</th>
                     <th className="px-6 py-4 font-medium">發票號碼</th>
                     <th className="px-6 py-4 font-medium">開立日期</th>
@@ -2620,18 +2686,6 @@
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <button
-                            onClick={() =>
-                              alert(
-                                `Prototype：查看單據（快速摘要）\n\n對帳單：${row.id}\n發票：${row.invoiceNo}\n金額：${formatMoney(
-                                  row.amount
-                                )}`
-                              )
-                            }
-                            className="text-gray-600 hover:text-gray-800 font-medium text-sm"
-                          >
-                            快速摘要
-                          </button>
                           <button
                             onClick={() => {
                               const ledgerNow = loadPartialLedger();
@@ -2677,6 +2731,9 @@
                                 invoiceNo: row.invoiceNo || "",
                                 invoiceDate: row.invoiceDateISO || row.date || "",
                                 issuer: row.issuer || "",
+                              invoiceAmount: safeNumber(row.amount),
+                                customerName: (row.payload?.rawLines?.[0]?.customerName || row.payload?.rawLines?.[0]?.channelFull || row.payload?.rawLines?.[0]?.channelName || row.channel || ""),
+                                uniformNo: (row.payload?.rawLines?.[0]?.uniformNo || row.payload?.rawLines?.[0]?.統一編號 || row.payload?.rawLines?.[0]?.統編 || row.payload?.rawLines?.[0]?.TaxId || row.payload?.rawLines?.[0]?.taxId || ""),
                                 notifyEmail: row.notifyEmail || "",
                                 note: row.note || "",
                                 rawLines: rehydratedRawLines,
@@ -2695,8 +2752,8 @@
     <div id="viewOnlyBanner" class="hidden bg-slate-800 text-white text-center text-sm py-2.5 px-4">
       已開立 · <strong>唯讀檢視</strong>（此分頁所有欄位不可編輯）
     </div>
-    <div class="max-w-6xl mx-auto p-6">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+    <div class="max-w-6xl mx-auto p-6 overflow-x-auto">
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
         <div class="p-6 border-b border-gray-100 flex items-center justify-between gap-4">
           <div>
             <div class="text-sm text-gray-500">對帳單編號</div>
@@ -2717,35 +2774,41 @@
               <div class="mt-3 space-y-2 text-sm">
                 <div class="flex justify-between gap-4"><span class="text-gray-500">發票號碼</span><span id="invoiceNo" class="font-mono font-medium"></span></div>
                 <div class="flex justify-between gap-4"><span class="text-gray-500">發票日期</span><span id="invoiceDate" class="font-medium"></span></div>
-                <div class="flex justify-between gap-4"><span class="text-gray-500">開立人</span><span id="issuer" class="font-medium"></span></div>
-                <div class="flex justify-between gap-4 items-center"><span class="text-gray-500">通知信箱(ezpay)</span><input id="notifyEmail" class="border border-gray-300 rounded px-2 py-1 text-sm w-60 focus:outline-none focus:border-blue-500" placeholder="輸入通知信箱" /></div>
+                  <div class="flex justify-between gap-4"><span class="text-gray-500">發票金額</span><span id="invoiceAmount" class="font-mono font-medium"></span></div>
+                  <div class="flex justify-between gap-4"><span class="text-gray-500">客戶名稱</span><span id="customerName" class="font-medium"></span></div>
+                  <div class="flex justify-between gap-4"><span class="text-gray-500">統一編號</span><span id="uniformNo" class="font-mono font-medium"></span></div>
+                  <div class="flex justify-between gap-4"><span class="text-gray-500">開立人</span><span id="issuer" class="font-medium"></span></div>
+                  <div class="flex justify-between gap-4 items-center"><span class="text-gray-500">通知信箱(ezpay)</span><input id="notifyEmail" class="border border-gray-300 rounded px-2 py-1 text-sm w-60 focus:outline-none focus:border-blue-500" placeholder="輸入通知信箱" /></div>
               </div>
             </div>
             <div class="border border-gray-200 rounded-xl p-5">
-              <div class="text-sm text-gray-500">財務結算卡</div>
-              <div id="amount" class="mt-2 text-2xl font-extrabold text-blue-600"></div>
-              <div class="mt-1 text-xs text-gray-500">發票總額（商品淨額 - 扣款 + 加減項）</div>
+                <div class="text-sm text-gray-500">發票總金額</div>
+                <div id="amount" class="mt-2 text-2xl font-extrabold text-blue-600"></div>
+                <div class="mt-1 text-xs text-gray-500 flex justify-between gap-4">
+                  <span>發票總額（商品淨額 - 扣款 + 調整項目）</span>
+                  <span id="invoiceTotalFormula" class="font-medium text-gray-900"></span>
+                </div>
               <div class="mt-3 grid grid-cols-1 gap-2 text-sm">
                 <div class="flex justify-between gap-4"><span class="text-gray-500">出貨總計</span><span id="shipTotal" class="font-medium"></span></div>
                 <div class="flex justify-between gap-4"><span class="text-gray-500">退貨總計</span><span id="returnTotal" class="font-medium text-red-600"></span></div>
-                <div class="flex justify-between gap-4"><span class="text-gray-500">商品淨額</span><span id="baseNet" class="font-semibold text-blue-600"></span></div>
-                <div class="flex justify-between gap-4"><span class="text-gray-500">扣款/調整</span><span id="deductions" class="font-medium"></span></div>
-                <div class="flex justify-between gap-4"><span class="text-gray-500">加減項合計</span><span id="adjSum" class="font-medium"></span></div>
+                <div class="flex justify-between gap-4"><span class="text-gray-500">淨額</span><span id="baseNet" class="font-semibold text-blue-600"></span></div>
+                
+                  <div class="flex justify-between gap-4"><span class="text-gray-500">調整項合計</span><span id="adjSum" class="font-medium"></span></div>
                 <div class="flex justify-between gap-4 items-start"><span class="text-gray-500 shrink-0">備註</span><textarea id="note" rows="2" class="border border-gray-300 rounded px-2 py-1 text-sm w-full focus:outline-none focus:border-blue-500 resize-y min-h-[2.5rem]" placeholder="備註..."></textarea></div>
               </div>
             </div>
           </div>
 
-          <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <div class="border border-gray-200 rounded-xl overflow-x-auto">
             <div class="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <span id="linesSectionTitle">明細（可編輯：單價/數量 → 自算小計）</span>
+                <span id="linesSectionTitle">小計明細</span>
                 <button id="toggleLinesBtn" class="text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50">展開全部</button>
               </div>
               <span id="linesSectionHint" class="text-xs text-gray-500">此分頁的編輯會回寫主視窗草稿</span>
             </div>
-            <div class="overflow-auto">
-              <table class="w-full text-left text-sm">
+            <div class="overflow-x-auto overflow-y-auto">
+              <table class="w-max min-w-[900px] text-left text-sm">
                 <thead class="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                   <tr>
                     <th class="px-5 py-3 font-medium whitespace-nowrap">單據類型</th>
@@ -2767,15 +2830,15 @@
 
           <div class="border border-gray-200 rounded-xl p-5 bg-gray-50">
             <div class="flex items-center justify-between">
-              <div id="adjSectionTitle" class="text-sm text-gray-600 font-medium">調整項目（可增刪修，金額可正可負）</div>
+              <div id="adjSectionTitle" class="text-sm text-gray-600 font-medium">調整項目</div>
               <button id="addAdjBtn" class="text-xs px-3 py-1.5 rounded border border-gray-200 bg-white hover:bg-gray-50">新增調整項</button>
             </div>
-            <div class="mt-3 overflow-auto">
-              <table class="w-full text-left text-sm">
+            <div class="mt-3 overflow-x-auto overflow-y-auto">
+              <table class="w-max min-w-[520px] text-left text-sm">
                 <thead class="text-gray-500">
                   <tr>
                     <th class="py-2 pr-3 font-medium">調整項目</th>
-                    <th class="py-2 pr-3 font-medium text-right">金額（淨額）</th>
+                    <th class="py-2 pr-3 font-medium text-right">金額</th>
                     <th id="adjThOp" class="py-2 pr-3 font-medium text-right">操作</th>
                   </tr>
                 </thead>
@@ -2784,16 +2847,16 @@
             </div>
           </div>
 
-          <div class="border border-gray-200 rounded-xl overflow-hidden">
+          <div class="border border-gray-200 rounded-xl overflow-x-auto">
             <div class="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center justify-between">
               <div class="flex items-center gap-3">
-                <span>Net 小計（依 SKU 彙總）</span>
+                <span>依 SKU 小計</span>
                 <button id="toggleSkuBtn" class="text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50">展開全部</button>
               </div>
               <div class="text-xs text-gray-500">開發票之根據：商品淨額 + 調整項目（下表含調整項目列）</div>
             </div>
-            <div class="overflow-auto">
-              <table class="w-full text-left text-sm">
+            <div class="overflow-x-auto overflow-y-auto">
+              <table class="w-max min-w-[720px] text-left text-sm">
                 <thead class="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                   <tr>
                     <th class="px-5 py-3 font-medium">SKU</th>
@@ -2904,7 +2967,7 @@
       const linesHint = document.getElementById('linesSectionHint');
       if (linesHint) linesHint.textContent = viewOnly ? '已開立，僅供檢視' : '此分頁的編輯會回寫主視窗草稿';
       const adjTitle = document.getElementById('adjSectionTitle');
-      if (adjTitle) adjTitle.textContent = viewOnly ? '調整項目（唯讀）' : '調整項目（可增刪修，金額可正可負）';
+      if (adjTitle) adjTitle.textContent = viewOnly ? '調整項目（唯讀）' : '調整項目';
       const addAdjBtn = document.getElementById('addAdjBtn');
       if (addAdjBtn) addAdjBtn.classList.toggle('hidden', viewOnly);
       const adjThOp = document.getElementById('adjThOp');
@@ -2913,6 +2976,12 @@
       document.getElementById('invoiceNo').textContent = data.invoiceNo || '-';
       document.getElementById('invoiceDate').textContent = data.invoiceDate || '-';
       document.getElementById('issuer').textContent = data.issuer || '-';
+      const invoiceAmountEl = document.getElementById('invoiceAmount');
+      if (invoiceAmountEl) invoiceAmountEl.textContent = fmtMoney(data.invoiceAmount ?? data.amount ?? 0);
+      const customerNameEl = document.getElementById('customerName');
+      if (customerNameEl) customerNameEl.textContent = data.customerName || '-';
+      const uniformNoEl = document.getElementById('uniformNo');
+      if (uniformNoEl) uniformNoEl.textContent = data.uniformNo || '-';
       const notifyEmailEl = document.getElementById('notifyEmail');
       const noteEl = document.getElementById('note');
       const deductionsEl = document.getElementById('deductions');
@@ -2927,7 +2996,7 @@
         noteEl.classList.add('bg-gray-50', 'text-gray-800', 'cursor-default');
       }
       const fixedDeductions = safeNumber(data.deductions || 0);
-      deductionsEl.textContent = String(fixedDeductions);
+      if (deductionsEl) deductionsEl.textContent = String(fixedDeductions);
 
       const saveBtn = document.getElementById('saveBtn');
       const issueBtn = document.getElementById('issueBtn');
@@ -2967,6 +3036,8 @@
         channelShort: r.channelShort || r['通路商簡稱'] || '',
         channelFull: r.channelFull || r.channelName || r['通路商'] || '',
         channelName: r.channelName || r['通路商'] || '',
+        customerName: r.customerName || r['客戶名稱'] || r.channelName || r.channelFull || '',
+        uniformNo: r.uniformNo || r['統一編號'] || r['統編'] || r['TaxId'] || r['taxId'] || '',
         shipDateISO: r.shipDateISO || r['實際出貨日期'] || '',
         shipDate: r.shipDate || '',
         inDateISO: r.inDateISO || r['實際入庫日期'] || '',
@@ -3214,6 +3285,8 @@
         document.getElementById('baseNet').textContent = fmtMoney(baseNet);
         document.getElementById('adjSum').textContent = (adjSum >= 0 ? '+' : '') + fmtMoney(adjSum).replace('$-', '-$');
         document.getElementById('amount').textContent = fmtMoney(invoiceTotal);
+        const invoiceTotalFormulaEl = document.getElementById('invoiceTotalFormula');
+        if (invoiceTotalFormulaEl) invoiceTotalFormulaEl.textContent = fmtMoney(invoiceTotal);
 
         const adjRows = (adjustments || []).map((a) => {
           const label = String(a.label || '').trim();
@@ -3421,7 +3494,7 @@
         };
 
         return (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
             <div className="p-6 border-b border-gray-100 flex items-start justify-between gap-6">
               <div className="min-w-0">
                 <div className="flex items-center gap-3 flex-wrap">
@@ -3474,7 +3547,7 @@
                     </div>
 
                 <div className="border border-gray-200 rounded-xl p-5">
-                  <div className="text-sm text-gray-500">財務結算卡</div>
+                  <div className="text-sm text-gray-500">摘要</div>
                   <div className="mt-2 text-2xl font-extrabold text-blue-600">
                     {formatMoney(finance.netAfterDeduction)}
                         </div>
@@ -3502,13 +3575,13 @@
                 </div>
               </div>
 
-              <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <div className="border border-gray-200 rounded-xl overflow-x-auto">
                   <div className="bg-gray-50 px-5 py-3 text-sm text-gray-600 font-medium flex items-center gap-2">
                     <Icon name="calculator" className="w-4 h-4" />
                   Net 小計
                   </div>
-                  <div className="overflow-auto">
-                    <table className="w-full text-left text-sm">
+                  <div className="overflow-x-auto overflow-y-auto">
+                    <table className="w-max min-w-[1100px] text-left text-sm">
                       <thead className="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                         <tr>
                         <th className="px-5 py-3 font-medium">通路商簡稱</th>
