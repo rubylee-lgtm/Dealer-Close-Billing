@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>出退貨請款與發票系統 Prototype v0.2.0</title>
+    <title>出退貨請款與發票系統 Prototype v0.3.0</title>
+    <meta name="app-version" content="0.3.0" />
 
     <!-- Tailwind (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -79,6 +80,9 @@
 
     <script type="text/babel">
       const { useEffect, useMemo, useState } = React;
+
+      /** 與 head 內 app-version meta、初始 title 字串請保持一致 */
+      const APP_VERSION = "0.3.0";
 
       function safeNumber(v) {
         if (v === null || v === undefined) return 0;
@@ -439,6 +443,10 @@
         };
 
         useEffect(() => {
+          document.title = `出退貨請款與發票系統 Prototype v${APP_VERSION}`;
+        }, []);
+
+        useEffect(() => {
           const onMsg = (evt) => {
             const data = evt?.data;
             if (!data || typeof data !== "object") return;
@@ -528,7 +536,7 @@
                 <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                   出退貨請款與發票系統 Prototype
                   <span className="text-xs font-semibold px-2 py-1 rounded bg-gray-100 text-gray-600 border border-gray-200">
-                    v0.2.0
+                    v{APP_VERSION}
                   </span>
                 </h1>
                 <div className="flex bg-gray-100 p-1 rounded-lg">
