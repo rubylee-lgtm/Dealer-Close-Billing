@@ -579,6 +579,7 @@
               invoiceNo: issuedNo,
               invoiceDate: dateISO,
             issuer: row.issuer,
+              adjustments: row.adjustments || [],
             deductions: safeNumber(row.deductions),
             netAmount: row.amount,
             memo: row.note ? `備註：${row.note}` : prev.memo,
