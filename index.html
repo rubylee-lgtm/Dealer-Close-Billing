@@ -621,6 +621,11 @@
                 commitPartialSettlementLines(payload.rawLines);
               }
               const amount = safeNumber(data.amount);
+              const invoiceDateISO =
+                typeof data.invoiceDate === "string" && data.invoiceDate.trim()
+                  ? data.invoiceDate.trim()
+                  : "";
+              const invoiceDateHuman = invoiceDateISO ? invoiceDateISO.replaceAll("-", "/") : "";
               let effectiveId = id;
               setSettledList((prev) => {
                 const exists = newId && prev.some((r) => r.id === newId);
@@ -637,6 +642,8 @@
                         notifyEmail: typeof data.notifyEmail === "string" ? data.notifyEmail : r.notifyEmail,
                         deductions: safeNumber(data.deductions ?? r.deductions),
                         adjustments: Array.isArray(data.adjustments) ? data.adjustments : r.adjustments,
+                        invoiceDateISO: invoiceDateISO || r.invoiceDateISO,
+                        date: invoiceDateHuman || r.date,
                       }
                     : r
                 );
@@ -657,6 +664,11 @@
                 commitPartialSettlementLines(payload.rawLines);
               }
               const amount = safeNumber(data.amount);
+              const invoiceDateISO =
+                typeof data.invoiceDate === "string" && data.invoiceDate.trim()
+                  ? data.invoiceDate.trim()
+                  : "";
+              const invoiceDateHuman = invoiceDateISO ? invoiceDateISO.replaceAll("-", "/") : "";
               let effectiveId = id;
               setSettledList((prev) => {
                 const exists = newId && prev.some((r) => r.id === newId);
@@ -673,6 +685,8 @@
                         notifyEmail: typeof data.notifyEmail === "string" ? data.notifyEmail : r.notifyEmail,
                         deductions: safeNumber(data.deductions ?? r.deductions),
                         adjustments: Array.isArray(data.adjustments) ? data.adjustments : r.adjustments,
+                        invoiceDateISO: invoiceDateISO || r.invoiceDateISO,
+                        date: invoiceDateHuman || r.date,
                       }
                     : r
                 );
@@ -723,7 +737,18 @@
                         : "text-gray-500 hover:text-gray-700"
                     }`}
                   >
-                    正在結算 (Step 3)
+                    <img
+                      alt="正在結算"
+                      className="h-5 w-auto"
+                      src={`data:image/svg+xml;utf8,${encodeURIComponent(
+                        `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="24" viewBox="0 0 96 24">
+                          <rect x="0" y="0" width="96" height="24" rx="12" fill="#2563EB"/>
+                          <path d="M14 6v12h12V6H14zm2 2h8v8h-8V8z" fill="white" opacity="0.9"/>
+                          <text x="32" y="16" font-family="Segoe UI, Noto Sans TC, Arial" font-size="12" fill="white">正在結算</text>
+                        </svg>`
+                      )}`}
+                    />
+                    <span className="sr-only">正在結算 (Step 3)</span>
                   </button>
                   <button
                     onClick={() => setCurrentView("settled")}
@@ -733,17 +758,19 @@
                         : "text-gray-500 hover:text-gray-700"
                     }`}
                   >
-                    結算完畢列表
-                  </button>
-                  <button
-                    onClick={() => setCurrentView("closed")}
-                    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                      currentView === "closed"
-                        ? "bg-white text-blue-600 shadow-sm"
-                        : "text-gray-500 hover:text-gray-700"
-                    }`}
-                  >
-                    結案視角 (完成樣貌)
+                    <img
+                      alt="結算完畢列表"
+                      className="h-5 w-auto"
+                      src={`data:image/svg+xml;utf8,${encodeURIComponent(
+                        `<svg xmlns="http://www.w3.org/2000/svg" width="110" height="24" viewBox="0 0 110 24">
+                          <rect x="0" y="0" width="110" height="24" rx="12" fill="#FFFFFF"/>
+                          <rect x="1" y="1" width="108" height="22" rx="11" fill="none" stroke="#CBD5E1"/>
+                          <path d="M14 7h12v2H14V7zm0 4h12v2H14v-2zm0 4h8v2h-8v-2z" fill="#475569"/>
+                          <text x="32" y="16" font-family="Segoe UI, Noto Sans TC, Arial" font-size="12" fill="#475569">結算完畢列表</text>
+                        </svg>`
+                      )}`}
+                    />
+                    <span className="sr-only">結算完畢列表</span>
                   </button>
                 </div>
               </div>
@@ -2773,7 +2800,11 @@
               <div class="text-sm text-gray-500">發票資訊</div>
               <div class="mt-3 space-y-2 text-sm">
                 <div class="flex justify-between gap-4"><span class="text-gray-500">發票號碼</span><span id="invoiceNo" class="font-mono font-medium"></span></div>
-                <div class="flex justify-between gap-4"><span class="text-gray-500">發票日期</span><span id="invoiceDate" class="font-medium"></span></div>
+                <div class="flex justify-between gap-4 items-center">
+                  <span class="text-gray-500">發票日期</span>
+                  <input id="invoiceDateInput" type="date" class="border border-gray-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:border-blue-500" />
+                  <span id="invoiceDate" class="hidden font-medium"></span>
+                </div>
                   <div class="flex justify-between gap-4"><span class="text-gray-500">發票金額</span><span id="invoiceAmount" class="font-mono font-medium"></span></div>
                   <div class="flex justify-between gap-4"><span class="text-gray-500">客戶名稱</span><span id="customerName" class="font-medium"></span></div>
                   <div class="flex justify-between gap-4"><span class="text-gray-500">統一編號</span><span id="uniformNo" class="font-mono font-medium"></span></div>
@@ -2974,10 +3005,12 @@
       if (adjThOp) adjThOp.classList.toggle('hidden', viewOnly);
 
       document.getElementById('invoiceNo').textContent = data.invoiceNo || '-';
-      document.getElementById('invoiceDate').textContent = data.invoiceDate || '-';
+      const invoiceDateTextEl = document.getElementById('invoiceDate');
+      const invoiceDateInputEl = document.getElementById('invoiceDateInput');
+      if (invoiceDateInputEl) invoiceDateInputEl.value = (data.invoiceDate || '').slice(0, 10);
+      if (invoiceDateTextEl) invoiceDateTextEl.textContent = data.invoiceDate || '-';
       document.getElementById('issuer').textContent = data.issuer || '-';
       const invoiceAmountEl = document.getElementById('invoiceAmount');
-      if (invoiceAmountEl) invoiceAmountEl.textContent = fmtMoney(data.invoiceAmount ?? data.amount ?? 0);
       const customerNameEl = document.getElementById('customerName');
       if (customerNameEl) customerNameEl.textContent = data.customerName || '-';
       const uniformNoEl = document.getElementById('uniformNo');
@@ -2988,6 +3021,12 @@
       notifyEmailEl.value = data.notifyEmail || '';
       noteEl.value = data.note || '';
       if (viewOnly) {
+        if (invoiceDateInputEl) {
+          invoiceDateInputEl.readOnly = true;
+          invoiceDateInputEl.tabIndex = -1;
+          invoiceDateInputEl.classList.add('bg-gray-50', 'text-gray-800', 'cursor-default');
+        }
+        if (invoiceDateTextEl) invoiceDateTextEl.classList.remove('hidden');
         notifyEmailEl.readOnly = true;
         notifyEmailEl.tabIndex = -1;
         notifyEmailEl.classList.add('bg-gray-50', 'text-gray-800', 'cursor-default');
@@ -3287,6 +3326,7 @@
         document.getElementById('amount').textContent = fmtMoney(invoiceTotal);
         const invoiceTotalFormulaEl = document.getElementById('invoiceTotalFormula');
         if (invoiceTotalFormulaEl) invoiceTotalFormulaEl.textContent = fmtMoney(invoiceTotal);
+        if (invoiceAmountEl) invoiceAmountEl.textContent = fmtMoney(invoiceTotal);
 
         const adjRows = (adjustments || []).map((a) => {
           const label = String(a.label || '').trim();
@@ -3335,6 +3375,7 @@
           amount: built.amount,
           deductions: built.deductions,
           adjustments: adjustments || [],
+          invoiceDate: invoiceDateInputEl ? (invoiceDateInputEl.value || '') : (data.invoiceDate || ''),
           notifyEmail: notifyEmailEl.value || '',
           note: noteEl.value || '',
         }, '*');
@@ -3362,6 +3403,7 @@
               amount: built.amount,
               deductions: built.deductions,
               adjustments: adjustments || [],
+              invoiceDate: invoiceDateInputEl ? (invoiceDateInputEl.value || '') : (data.invoiceDate || ''),
               notifyEmail: notifyEmailEl.value || '',
               note: noteEl.value || '',
             }, '*');
