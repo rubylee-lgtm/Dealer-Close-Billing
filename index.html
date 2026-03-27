@@ -322,6 +322,23 @@
         return `${yyyy}-${mm}-${dd}`;
       }
 
+      function nowISODateTime() {
+        return new Date().toISOString();
+      }
+
+      function formatDateTime(v) {
+        if (!v) return "-";
+        const d = new Date(v);
+        if (Number.isNaN(d.getTime())) return String(v);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const hh = String(d.getHours()).padStart(2, "0");
+        const mi = String(d.getMinutes()).padStart(2, "0");
+        const ss = String(d.getSeconds()).padStart(2, "0");
+        return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+      }
+
       function genInvoiceNo(seedIndex) {
         const base = 88293011;
         return `TK-${String(base + seedIndex).padStart(8, "0")}`;
@@ -525,14 +542,25 @@
           setTimeout(() => {
             const dateISO = settlingDoc.invoiceDate || todayISO();
             const dateHuman = dateISO.replaceAll("-", "/");
+            const nowTs = nowISODateTime();
+            const actor = settlingDoc.issuer.replace("財務部 - ", "");
+            const customerName =
+              settlingDoc.customerName ||
+              payload?.rawLines?.[0]?.customerName ||
+              payload?.rawLines?.[0]?.channelFull ||
+              payload?.rawLines?.[0]?.channelName ||
+              "";
 
             const settledRow = {
               id: settlingDoc.id,
               channel: settlingDoc.channel,
+              customerName,
               amount: netAmount,
               invoiceNo: "",
               date: dateHuman,
-              issuer: settlingDoc.issuer.replace("財務部 - ", ""),
+              issuer: actor,
+              draftBy: actor,
+              issueBy: "",
               status: "草稿",
               payload: payload || null, // { rawLines, subtotals, periodStart, periodEnd }
               notifyEmail: settlingDoc.notifyEmail || "",
@@ -540,6 +568,9 @@
               deductions: safeNumber(settlingDoc.deductions),
               note: settlingDoc.note || "",
               invoiceDateISO: dateISO,
+              createdAtISO: nowTs,
+              draftSavedAtISO: nowTs,
+              issuedAtISO: "",
             };
 
             setSettledList((prev) => [settledRow, ...prev]);
@@ -551,7 +582,7 @@
           }, 900);
         };
 
-        const issueInvoiceForId = (id) => {
+        const issueInvoiceForId = (id, actorName) => {
           const row = settledList.find((x) => x.id === id);
           if (!row) return;
           if (row.status !== "草稿") return;
@@ -559,6 +590,8 @@
           const issuedNo = genInvoiceNo(settledList.length + 1);
           const dateISO = row?.invoiceDateISO || todayISO();
           const dateHuman = dateISO.replaceAll("-", "/");
+          const issuedAtISO = nowISODateTime();
+          const issueActor = (actorName || row.draftBy || row.issuer || settlingDoc.issuer.replace("財務部 - ", "")).trim();
 
           setSettledList((prev) =>
             prev.map((r) =>
@@ -568,6 +601,9 @@
                     invoiceNo: issuedNo,
                     date: dateHuman,
                     status: "已開立",
+                    issueBy: issueActor,
+                    issuer: issueActor,
+                    issuedAtISO,
                   }
                 : r
             )
@@ -580,11 +616,11 @@
             channel: row.channel,
               invoiceNo: issuedNo,
               invoiceDate: dateISO,
-            issuer: row.issuer,
+            issuer: issueActor,
               adjustments: row.adjustments || [],
             deductions: safeNumber(row.deductions),
             netAmount: row.amount,
-            memo: row.note ? `備註：${row.note}` : prev.memo,
+            memo: row.note ? `發票備註：${row.note}` : prev.memo,
               status: "結案 (鎖定)",
             subtotals: p.subtotals || prev.subtotals,
             rawLines: p.rawLines || prev.rawLines,
@@ -626,6 +662,11 @@
                   ? data.invoiceDate.trim()
                   : "";
               const invoiceDateHuman = invoiceDateISO ? invoiceDateISO.replaceAll("-", "/") : "";
+              const nowTs = nowISODateTime();
+              const actor =
+                typeof data.issuer === "string" && data.issuer.trim()
+                  ? data.issuer.trim()
+                  : "";
               let effectiveId = id;
               setSettledList((prev) => {
                 const exists = newId && prev.some((r) => r.id === newId);
@@ -637,6 +678,11 @@
                         ...r,
                         id: effectiveId,
                         payload: payload || r.payload,
+                        customerName:
+                          payload?.rawLines?.[0]?.customerName ||
+                          payload?.rawLines?.[0]?.channelFull ||
+                          payload?.rawLines?.[0]?.channelName ||
+                          r.customerName,
                         amount: Number.isFinite(amount) ? amount : r.amount,
                         note: typeof data.note === "string" ? data.note : r.note,
                         notifyEmail: typeof data.notifyEmail === "string" ? data.notifyEmail : r.notifyEmail,
@@ -644,6 +690,9 @@
                         adjustments: Array.isArray(data.adjustments) ? data.adjustments : r.adjustments,
                         invoiceDateISO: invoiceDateISO || r.invoiceDateISO,
                         date: invoiceDateHuman || r.date,
+                        draftSavedAtISO: nowTs,
+                        draftBy: actor || r.draftBy || r.issuer,
+                        issuer: actor || r.issuer,
                       }
                     : r
                 );
@@ -669,6 +718,10 @@
                   ? data.invoiceDate.trim()
                   : "";
               const invoiceDateHuman = invoiceDateISO ? invoiceDateISO.replaceAll("-", "/") : "";
+              const actor =
+                typeof data.issuer === "string" && data.issuer.trim()
+                  ? data.issuer.trim()
+                  : "";
               let effectiveId = id;
               setSettledList((prev) => {
                 const exists = newId && prev.some((r) => r.id === newId);
@@ -687,11 +740,13 @@
                         adjustments: Array.isArray(data.adjustments) ? data.adjustments : r.adjustments,
                         invoiceDateISO: invoiceDateISO || r.invoiceDateISO,
                         date: invoiceDateHuman || r.date,
+                        draftBy: actor || r.draftBy || r.issuer,
+                        issuer: actor || r.issuer,
                       }
                     : r
                 );
               });
-              issueInvoiceForId(effectiveId);
+              issueInvoiceForId(effectiveId, actor);
               try {
                 evt.source?.postMessage({ type: "DAS_ISSUE_INVOICE_DONE", id, newId: effectiveId }, "*");
               } catch {
@@ -759,18 +814,18 @@
                     }`}
                   >
                     <img
-                      alt="結算完畢列表"
+                      alt="結算列表"
                       className="h-5 w-auto"
                       src={`data:image/svg+xml;utf8,${encodeURIComponent(
                         `<svg xmlns="http://www.w3.org/2000/svg" width="110" height="24" viewBox="0 0 110 24">
                           <rect x="0" y="0" width="110" height="24" rx="12" fill="#FFFFFF"/>
                           <rect x="1" y="1" width="108" height="22" rx="11" fill="none" stroke="#CBD5E1"/>
                           <path d="M14 7h12v2H14V7zm0 4h12v2H14v-2zm0 4h8v2h-8v-2z" fill="#475569"/>
-                          <text x="32" y="16" font-family="Segoe UI, Noto Sans TC, Arial" font-size="12" fill="#475569">結算完畢列表</text>
+                          <text x="32" y="16" font-family="Segoe UI, Noto Sans TC, Arial" font-size="12" fill="#475569">結算列表</text>
                         </svg>`
                       )}`}
                     />
-                    <span className="sr-only">結算完畢列表</span>
+                    <span className="sr-only">結算列表</span>
                   </button>
                 </div>
               </div>
@@ -1501,7 +1556,6 @@
           channelShort: importState.filter?.channelShort || "",
           shipStart: importState.filter?.shipStart || "",
           shipEnd: importState.filter?.shipEnd || "",
-          q: importState.filter?.q || "",
           docTypes: importState.filter?.docTypes || [],
           docNos: importState.filter?.docNos || [],
           hideFullySettled: importState.filter?.hideFullySettled !== false,
@@ -1512,7 +1566,6 @@
             channelShort: importState.filter?.channelShort || "",
             shipStart: importState.filter?.shipStart || "",
             shipEnd: importState.filter?.shipEnd || "",
-            q: importState.filter?.q || "",
             docTypes: importState.filter?.docTypes || [],
             docNos: importState.filter?.docNos || [],
             hideFullySettled: importState.filter?.hideFullySettled !== false,
@@ -1521,7 +1574,6 @@
           importState.filter?.channelShort,
           importState.filter?.shipStart,
           importState.filter?.shipEnd,
-          importState.filter?.q,
           importState.filter?.hideFullySettled,
         ]);
 
@@ -1535,7 +1587,6 @@
 
         const filteredRows = useMemo(() => {
           // Step2 篩選以「已套用」的條件為準
-          const q = (importState.filter?.q || "").trim().toLowerCase();
           const shipStart = importState.filter?.shipStart || "";
           const shipEnd = importState.filter?.shipEnd || "";
           const channelShort = importState.filter?.channelShort || "";
@@ -1563,10 +1614,6 @@
               };
               if (!inRange(ship) && !inRange(inbound)) return false;
             }
-            if (q) {
-              const hay = `${r.docType} ${r.docNo} ${r.channelShort} ${r.channelFull} ${r.sku} ${r.skuName}`.toLowerCase();
-              if (!hay.includes(q)) return false;
-            }
             if (importState.filter?.hideFullySettled !== false) {
               const t = normalizeDocType(r.docType);
               if ((t === "出貨" || t === "退貨") && safeNumber(r.availableQty) <= 0) return false;
@@ -1577,7 +1624,6 @@
 
         const docNoOptions = useMemo(() => {
           // 依「草稿條件」產生單號選項，並且要求先選通路+單據類型才出選項
-          const q = (draft.q || "").trim().toLowerCase();
           const shipStart = draft.shipStart || "";
           const shipEnd = draft.shipEnd || "";
           const channelShort = draft.channelShort || "";
@@ -1603,10 +1649,6 @@
               };
               if (!inRange(ship) && !inRange(inbound)) continue;
             }
-            if (q) {
-              const hay = `${r.docType} ${r.docNo} ${r.channelShort} ${r.channelFull} ${r.sku} ${r.skuName}`.toLowerCase();
-              if (!hay.includes(q)) continue;
-            }
             if (r.docNo) set.add(String(r.docNo));
           }
           return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
@@ -1615,7 +1657,6 @@
           draft.channelShort,
           draft.shipStart,
           draft.shipEnd,
-          draft.q,
           draft.docTypes,
         ]);
 
@@ -1698,17 +1739,6 @@
                 </div>
                 <div className="mt-1 text-xs text-gray-500">提示：先選通路＋單據類型後才會開啟單號選項</div>
               </div>
-              <div className="border border-gray-200 rounded-xl p-4 bg-white">
-                <div className="text-xs text-gray-500">關鍵字</div>
-                <input
-                  type="text"
-                  placeholder="單號 / SKU / 商品 / 通路..."
-                  value={draft.q}
-                  onChange={(e) => setDraft((prev) => ({ ...prev, q: e.target.value }))}
-                  className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                  disabled={(importState.rawLines?.length || 0) === 0}
-                />
-              </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1779,7 +1809,6 @@
                     channelShort: "",
                     shipStart: "",
                     shipEnd: "",
-                    q: "",
                     docTypes: [],
                     docNos: [],
                     hideFullySettled: true,
@@ -1822,7 +1851,9 @@
                   <span>
                     勾選要結算的單據
                   </span>
-                  
+                  <span className="ml-2 text-xs text-gray-500 font-normal">
+                    經銷商：{draft.channelShort || "全部通路"}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                   <button
@@ -1855,22 +1886,21 @@
                 </div>
               </div>
               <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
-              <table className="w-max min-w-[1150px] text-left text-sm">
-                  <thead className="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
+              <table className="w-max min-w-[1450px] text-left text-sm">
+                  <thead className="bg-white text-gray-500 sticky top-0 z-50 border-b border-gray-100">
                     <tr>
-                      <th className="px-4 py-3 font-medium">勾選</th>
-                      <th className="px-4 py-3 font-medium">狀態</th>
-                      <th className="px-4 py-3 font-medium">單據類型</th>
-                      <th className="px-4 py-3 font-medium">單號</th>
-                      <th className="px-4 py-3 font-medium">經銷商</th>
-                      <th className="px-4 py-3 font-medium">出貨日</th>
-                      <th className="px-4 py-3 font-medium">入庫日</th>
-                      <th className="px-4 py-3 font-medium">SKU</th>
-                      <th className="px-4 py-3 font-medium">商品名稱</th>
+                      <th className="px-4 py-3 font-medium sticky left-0 z-60 bg-white border-r border-gray-100 box-border w-[88px] min-w-[88px] max-w-[88px] whitespace-nowrap">勾選</th>
+                      <th className="px-4 py-3 font-medium sticky left-[88px] z-60 bg-white border-r border-gray-100 box-border w-[136px] min-w-[136px] max-w-[136px] whitespace-nowrap">單據類型</th>
+                      <th className="px-4 py-3 font-medium sticky left-[224px] z-60 bg-white border-r border-gray-100 box-border w-[210px] min-w-[210px] max-w-[210px] whitespace-nowrap">單號</th>
+                      <th className="px-4 py-3 font-medium sticky left-[434px] z-60 bg-white border-r border-gray-100 box-border w-[150px] min-w-[150px] max-w-[150px] whitespace-nowrap">SKU</th>
                       <th className="px-4 py-3 font-medium">單價</th>
                       <th className="px-4 py-3 font-medium">實際數量</th>
                       <th className="px-4 py-3 font-medium">剩餘可結</th>
                       <th className="px-4 py-3 font-medium">小計金額</th>
+                      <th className="px-4 py-3 font-medium">商品名稱</th>
+                      <th className="px-4 py-3 font-medium">出貨日</th>
+                      <th className="px-4 py-3 font-medium">入庫日</th>
+                      <th className="px-4 py-3 font-medium">狀態</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1881,7 +1911,7 @@
                         safeNumber(r.availableQty) <= 0;
                       return (
                         <tr key={r._id || idx} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 sticky left-0 z-30 bg-white border-r border-gray-100 box-border w-[88px] min-w-[88px] max-w-[88px]">
                             <input
                               type="checkbox"
                               checked={checked}
@@ -1895,6 +1925,32 @@
                               }}
                               className="w-4 h-4 accent-blue-600 disabled:opacity-40"
                             />
+                          </td>
+                          <td className="px-4 py-3 sticky left-[88px] z-30 bg-white border-r border-gray-100 box-border w-[136px] min-w-[136px] max-w-[136px]">
+                            <span
+                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
+                                normalizeDocType(r.docType) === "退貨"
+                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  : "bg-blue-50 text-blue-700 border-blue-200"
+                              }`}
+                            >
+                              {normalizeDocType(r.docType) || "-"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-gray-900 sticky left-[224px] z-30 bg-white border-r border-gray-100 box-border w-[210px] min-w-[210px] max-w-[210px] whitespace-nowrap">{r.docNo || "-"}</td>
+                          <td className="px-4 py-3 font-mono text-gray-800 sticky left-[434px] z-30 bg-white border-r border-gray-100 box-border w-[150px] min-w-[150px] max-w-[150px] whitespace-nowrap">{r.sku || "-"}</td>
+                          <td className="px-4 py-3 text-gray-700">{formatMoney(r.unitPrice)}</td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {safeNumber(r.originalQty)}
+                          </td>
+                          <td className="px-4 py-3 text-blue-700 font-medium">
+                            {(normalizeDocType(r.docType) === "出貨" || normalizeDocType(r.docType) === "退貨") ? safeNumber(r.availableQty) : "—"}
+                          </td>
+                          <td className="px-4 py-3 text-gray-900 font-medium">{formatMoney(r.lineAmount)}</td>
+                          <td className="px-4 py-3 text-gray-700">{r.skuName || "-"}</td>
+                          <td className="px-4 py-3 text-gray-700">{r.shipDate || "-"}</td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {normalizeDocType(r.docType) === "退貨" ? (r.inDate || "-") : (r.inDate || "-")}
                           </td>
                           <td className="px-4 py-3 whitespace-nowrap">
                             <span
@@ -1911,39 +1967,12 @@
                               {partialSettlementStatusLabel(r)}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
-                                normalizeDocType(r.docType) === "退貨"
-                                  ? "bg-red-50 text-red-700 border-red-200"
-                                  : "bg-blue-50 text-blue-700 border-blue-200"
-                              }`}
-                            >
-                              {normalizeDocType(r.docType) || "-"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 font-mono text-gray-900">{r.docNo || "-"}</td>
-                          <td className="px-4 py-3 text-gray-700">{r.channelShort || "-"}</td>
-                          <td className="px-4 py-3 text-gray-700">{r.shipDate || "-"}</td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {normalizeDocType(r.docType) === "退貨" ? (r.inDate || "-") : (r.inDate || "-")}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-gray-800">{r.sku || "-"}</td>
-                          <td className="px-4 py-3 text-gray-700">{r.skuName || "-"}</td>
-                          <td className="px-4 py-3 text-gray-700">{formatMoney(r.unitPrice)}</td>
-                          <td className="px-4 py-3 text-gray-700">
-                            {safeNumber(r.originalQty)}
-                          </td>
-                          <td className="px-4 py-3 text-blue-700 font-medium">
-                            {(normalizeDocType(r.docType) === "出貨" || normalizeDocType(r.docType) === "退貨") ? safeNumber(r.availableQty) : "—"}
-                          </td>
-                          <td className="px-4 py-3 text-gray-900 font-medium">{formatMoney(r.lineAmount)}</td>
                         </tr>
                       );
                     })}
                     {filteredRows.length === 0 && (
                       <tr>
-                        <td colSpan="13" className="px-6 py-10 text-center text-gray-500">
+                        <td colSpan="12" className="px-6 py-10 text-center text-gray-500">
                           沒有符合條件的資料
                         </td>
                   </tr>
@@ -2026,6 +2055,32 @@
           return true;
         }, [importState.confirmed]);
 
+        useEffect(() => {
+          const src = importState.settleLines || [];
+          if (src.length === 0) return;
+          let changed = false;
+          const nextLines = src.map((x) => {
+            const dt = normalizeDocType(x.docType);
+            const isTracked = dt === "出貨" || dt === "退貨";
+            if (!isTracked) return x;
+            const qtyText = x.qty === null || x.qty === undefined ? "" : String(x.qty).trim();
+            if (qtyText !== "") return x;
+            const defaultQty = Math.max(0, safeNumber(x.availableQty));
+            changed = true;
+            return {
+              ...x,
+              qty: defaultQty,
+              lineAmount: Math.abs(safeNumber(x.unitPrice)) * Math.abs(defaultQty),
+            };
+          });
+          if (!changed) return;
+          setImportState((prev) => ({
+            ...prev,
+            settleLines: nextLines,
+            subtotals: computeSubtotalsFromLines(nextLines),
+          }));
+        }, [importState.settleLines, setImportState]);
+
         const totals = useMemo(() => {
           const st = importState.subtotals || [];
           const shipAmount = st.reduce((acc, r) => acc + safeNumber(r.shipAmount), 0);
@@ -2036,6 +2091,17 @@
             netBeforeDeduction: shipAmount - returnAmount,
           };
         }, [importState.subtotals]);
+
+        const hasQtyOverLimit = useMemo(() => {
+          return (importState.settleLines || []).some((ln) => {
+            const dt = normalizeDocType(ln.docType);
+            const tracked = dt === "出貨" || dt === "退貨";
+            if (!tracked) return false;
+            const qtyRaw = ln.qty === null || ln.qty === undefined ? "" : String(ln.qty).trim();
+            if (!qtyRaw) return false;
+            return Math.abs(safeNumber(ln.qty)) > safeNumber(ln.availableQty);
+          });
+        }, [importState.settleLines]);
 
         const adjValue = (a) => safeNumber(a?.amountText ?? a?.amount);
 
@@ -2097,7 +2163,7 @@
               .join(",")
           );
 
-          const headerSub = ["SKU", "商品名稱", "單價", "出貨數量", "退貨數量", "淨數量", "出貨金額", "退貨金額", "淨額", "備註"];
+          const headerSub = ["SKU", "商品名稱", "單價", "出貨數量", "退貨數量", "淨數量", "出貨金額", "退貨金額", "淨額", "發票備註"];
           const subLines = (importState.subtotals || []).map((r) =>
             [
               r.sku,
@@ -2192,33 +2258,38 @@
                   <Icon name="calculator" className="w-4 h-4" />
                   小計明細
                 </div>
-                <div className="text-xs text-gray-500">
-                  {importState.confirmed ? "已確認（鎖定）" : "未確認（可編輯）"}
-                </div>
+
               </div>
               <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
-                <table className="w-max min-w-[1200px] text-left text-sm">
-                  <thead className="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
+                <table className="w-max min-w-[1350px] text-left text-sm">
+                  <thead className="bg-white text-gray-500 sticky top-0 z-50 border-b border-gray-100">
                     <tr>
-                      <th className="px-4 py-3 font-medium">單據類型</th>
-                      <th className="px-4 py-3 font-medium">狀態</th>
-                      <th className="px-4 py-3 font-medium">單號</th>
-                      <th className="px-4 py-3 font-medium">經銷商</th>
-                      <th className="px-4 py-3 font-medium">出貨日</th>
-                      <th className="px-4 py-3 font-medium">入庫日</th>
-                      <th className="px-4 py-3 font-medium">SKU</th>
-                      <th className="px-4 py-3 font-medium">商品名稱</th>
-                      <th className="px-4 py-3 font-medium">實際數量</th>
-                      <th className="px-4 py-3 font-medium">剩餘可結</th>
+                      <th className="px-4 py-3 font-medium sticky left-0 z-60 bg-white border-r border-gray-100 box-border w-[136px] min-w-[136px] max-w-[136px] whitespace-nowrap">單據類型</th>
+                      <th className="px-4 py-3 font-medium sticky left-[136px] z-60 bg-white border-r border-gray-100 box-border w-[210px] min-w-[210px] max-w-[210px] whitespace-nowrap">單號</th>
+                      <th className="px-4 py-3 font-medium sticky left-[346px] z-60 bg-white border-r border-gray-100 box-border w-[150px] min-w-[150px] max-w-[150px] whitespace-nowrap">SKU</th>
                       <th className="px-4 py-3 font-medium">單價</th>
                       <th className="px-4 py-3 font-medium">本次結算數量</th>
+                      <th className="px-4 py-3 font-medium">實際數量</th>
+                      <th className="px-4 py-3 font-medium">剩餘可結</th>
                       <th className="px-4 py-3 font-medium">小計金額</th>
+                      <th className="px-4 py-3 font-medium">商品名稱</th>
+                      <th className="px-4 py-3 font-medium">出貨日</th>
+                      <th className="px-4 py-3 font-medium">入庫日</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {(importState.settleLines || []).map((r, idx) => (
                       <tr key={(r._id || "line") + "_" + idx} className="hover:bg-blue-50/30 transition-colors">
-                        <td className="px-4 py-3">
+                        {(() => {
+                          const dt = normalizeDocType(r.docType);
+                          const tracked = dt === "出貨" || dt === "退貨";
+                          const maxQty = safeNumber(r.availableQty);
+                          const qtyAbs = Math.abs(safeNumber(r.qty));
+                          const qtyRaw = r.qty === null || r.qty === undefined ? "" : String(r.qty).trim();
+                          const isQtyOverLimit = tracked && qtyRaw !== "" && qtyAbs > maxQty;
+                          return (
+                            <>
+                        <td className="px-4 py-3 sticky left-0 z-30 bg-white border-r border-gray-100 box-border w-[136px] min-w-[136px] max-w-[136px]">
                           <span
                             className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
                               normalizeDocType(r.docType) === "退貨"
@@ -2229,23 +2300,8 @@
                             {normalizeDocType(r.docType) || "-"}
                           </span>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border border-slate-200 bg-slate-50 text-slate-700">
-                            {partialSettlementStatusLabel(r)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-gray-900">{r.docNo || "-"}</td>
-                        <td className="px-4 py-3 text-gray-700">{r.channelShort || "-"}</td>
-                        <td className="px-4 py-3 text-gray-700">{r.shipDate || "-"}</td>
-                        <td className="px-4 py-3 text-gray-700">{r.inDate || "-"}</td>
-                        <td className="px-4 py-3 font-mono text-gray-800">{r.sku || "-"}</td>
-                        <td className="px-4 py-3 text-gray-700">{r.skuName || "-"}</td>
-                        <td className="px-4 py-3 text-gray-700">
-                          {safeNumber(r.originalQty)}
-                        </td>
-                        <td className="px-4 py-3 text-blue-700 font-medium">
-                          {(normalizeDocType(r.docType) === "出貨" || normalizeDocType(r.docType) === "退貨") ? safeNumber(r.availableQty) : "—"}
-                        </td>
+                        <td className="px-4 py-3 font-mono text-gray-900 sticky left-[136px] z-30 bg-white border-r border-gray-100 box-border w-[210px] min-w-[210px] max-w-[210px] whitespace-nowrap">{r.docNo || "-"}</td>
+                        <td className="px-4 py-3 font-mono text-gray-800 sticky left-[346px] z-30 bg-white border-r border-gray-100 box-border w-[150px] min-w-[150px] max-w-[150px] whitespace-nowrap">{r.sku || "-"}</td>
                         <td className="px-4 py-3">
                           <input
                             type="text"
@@ -2279,7 +2335,7 @@
                               });
                               ensureDocSynced();
                             }}
-                            className="border border-gray-300 rounded px-2 py-1.5 text-sm w-28 text-right focus:outline-none focus:border-blue-500 disabled:bg-gray-100"
+                            className="border border-gray-300 rounded px-2 py-1.5 text-sm w-24 text-right focus:outline-none focus:border-blue-500 disabled:bg-gray-100"
                           />
                         </td>
                         <td className="px-4 py-3">
@@ -2299,18 +2355,11 @@
                               setImportState((prev) => {
                                 const nextLines = (prev.settleLines || []).map((x) => {
                                   if (x._id !== r._id) return x;
-                                  let qtyVal = t;
-                                  const dt = normalizeDocType(x.docType);
-                                  if (dt === "出貨" || dt === "退貨") {
-                                    const maxA = safeNumber(x.availableQty);
-                                    const n = Math.abs(safeNumber(t));
-                                    qtyVal = String(Math.min(maxA, Math.max(0, n)));
-                                  }
                                   return {
                                     ...x,
-                                    qty: qtyVal,
+                                    qty: t,
                                     lineAmount:
-                                      Math.abs(safeNumber(x.unitPrice)) * Math.abs(safeNumber(qtyVal)),
+                                      Math.abs(safeNumber(x.unitPrice)) * Math.abs(safeNumber(t)),
                                   };
                                 });
                                 return {
@@ -2321,15 +2370,32 @@
                               });
                               ensureDocSynced();
                             }}
-                            className="border border-gray-300 rounded px-2 py-1.5 text-sm w-24 text-right focus:outline-none focus:border-blue-500 disabled:bg-gray-100"
+                            className={`border rounded px-2 py-1.5 text-sm w-24 text-right focus:outline-none disabled:bg-gray-100 ${
+                              isQtyOverLimit
+                                ? "border-red-500 bg-red-50 text-red-700 focus:border-red-600"
+                                : "border-gray-300 focus:border-blue-500"
+                            }`}
+                            title={isQtyOverLimit ? `不可大於剩餘可結（${maxQty}）` : ""}
                           />
                         </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {safeNumber(r.originalQty)}
+                        </td>
+                        <td className="px-4 py-3 text-blue-700 font-medium">
+                          {(normalizeDocType(r.docType) === "出貨" || normalizeDocType(r.docType) === "退貨") ? safeNumber(r.availableQty) : "—"}
+                        </td>
                         <td className="px-4 py-3 text-gray-900 font-medium">{formatMoney(r.lineAmount)}</td>
+                        <td className="px-4 py-3 text-gray-700">{r.skuName || "-"}</td>
+                        <td className="px-4 py-3 text-gray-700">{r.shipDate || "-"}</td>
+                        <td className="px-4 py-3 text-gray-700">{r.inDate || "-"}</td>
+                            </>
+                          );
+                        })()}
                       </tr>
                     ))}
                     {(importState.settleLines || []).length === 0 && (
                       <tr>
-                        <td colSpan="13" className="px-6 py-10 text-center text-gray-500">
+                        <td colSpan="11" className="px-6 py-10 text-center text-gray-500">
                           沒有小計資料（請回到上一步勾選單據）
                         </td>
                       </tr>
@@ -2348,6 +2414,10 @@
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => {
+                      if (importState.confirmed) {
+                        setImportState((prev) => ({ ...prev, confirmed: false }));
+                        return;
+                      }
                       for (const ln of importState.settleLines || []) {
                         const dt = normalizeDocType(ln.docType);
                         if (dt !== "出貨" && dt !== "退貨") continue;
@@ -2363,10 +2433,10 @@
                       ensureDocSynced();
                       setImportState((prev) => ({ ...prev, confirmed: true }));
                     }}
-                    disabled={importState.confirmed || (importState.settleLines?.length || 0) === 0}
+                    disabled={(importState.settleLines?.length || 0) === 0 || (!importState.confirmed && hasQtyOverLimit)}
                     className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    確認小計
+                    {importState.confirmed ? "繼續編輯" : "確認小計"}
                   </button>
                 </div>
               </div>
@@ -2388,10 +2458,11 @@
               <div className="p-5">
                 <div className="mb-4 border border-amber-200 bg-amber-50 text-amber-900 rounded-lg px-4 py-3 text-sm">
                   <div className="font-semibold">提醒：加減項會影響最後的發票總額</div>
-                  <div className="mt-1 text-xs text-amber-800">
-                    計算方式：發票總額 = 淨額（扣款後） {adjustmentsSum >= 0 ? "+" : "-"} 加減項合計（依你輸入的正負號）
+                  <div className="mt-1">
+                    計算方式：發票總額 = 淨額（扣款後） + 加減項合計（依你輸入的正負號）
                   </div>
                 </div>
+
                 <div className="space-y-3">
                   {(settlingDoc.adjustments || []).map((a) => (
                     <div key={a.id} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
@@ -2489,7 +2560,7 @@
                     <th className="px-4 py-3 font-medium whitespace-nowrap">
                       發票號碼
                     </th>
-                    <th className="px-4 py-3 font-medium whitespace-nowrap">備註</th>
+                    <th className="px-4 py-3 font-medium whitespace-nowrap">發票備註</th>
                     <th className="px-4 py-3 font-medium whitespace-nowrap">通知信箱（ezpay）</th>
                     <th className="px-4 py-3 font-medium whitespace-nowrap">發票日期</th>
                   </tr>
@@ -2518,7 +2589,7 @@
                     <td className="px-4 py-4 whitespace-nowrap">
                       <input
                         type="text"
-                        placeholder="備註..."
+                        placeholder="最多輸入 200 字..."
                         value={settlingDoc.note}
                         onChange={(e) =>
                           setSettlingDoc((prev) => ({ ...prev, note: e.target.value }))
@@ -2608,21 +2679,39 @@
         const filtered = useMemo(() => {
           const s = q.trim();
           if (!s) return rows;
-          return rows.filter((r) => (r.id + " " + r.channel).includes(s));
+          return rows.filter((r) => (r.id + " " + r.channel + " " + (r.customerName || "")).includes(s));
         }, [q, rows]);
 
         const exportCSV = () => {
-          const header = ["對帳單編號", "通路商", "發票總額", "發票號碼", "開立日期", "開立人", "狀態"];
+          const header = [
+            "對帳單編號",
+            "經銷商",
+            "客戶名稱",
+            "發票總額",
+            "發票號碼",
+            "發票日期",
+            "建立日期",
+            "儲存為草稿的日期",
+            "開立日期",
+            "人員點擊開立發票的日期",
+            "開立人",
+            "狀態",
+          ];
           const lines = [
             header.join(","),
             ...filtered.map((r) =>
               [
                 r.id,
                 r.channel,
+                r.customerName || "",
                 formatMoney(r.amount),
                 r.invoiceNo,
-                r.date,
-                r.issuer,
+                (r.invoiceDateISO || "").replaceAll("-", "/"),
+                formatDateTime(r.createdAtISO),
+                formatDateTime(r.draftSavedAtISO),
+                r.status === "已開立" ? (r.date || "-") : "-",
+                formatDateTime(r.issuedAtISO),
+                r.status === "草稿" ? (r.draftBy || r.issuer || "-") : (r.issueBy || r.issuer || "-"),
                 r.status,
               ]
                 .map((x) => `"${String(x).replaceAll('"', '""')}"`)
@@ -2634,7 +2723,7 @@
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = `結算完畢列表_${new Date().toISOString().slice(0, 10)}.csv`;
+          a.download = `結算列表_${new Date().toISOString().slice(0, 10)}.csv`;
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -2657,33 +2746,25 @@
                     name="search"
                     className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
                   />
-                  <input
-                    type="text"
-                    placeholder="搜尋單號或通路商..."
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-64"
-                  />
+                  
                 </div>
-                <button
-                  onClick={exportCSV}
-                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium"
-                >
-                  <Icon name="file-down" className="w-4 h-4" />
-                  匯出報表
-                </button>
+          
               </div>
             </div>
 
             <div className="flex-1 overflow-x-auto overflow-y-auto">
-              <table className="w-max min-w-[900px] text-left text-sm">
+              <table className="w-max min-w-[1700px] text-left text-sm">
                 <thead className="bg-gray-50 text-gray-500 sticky top-0 z-10 shadow-sm">
                   <tr>
                     <th className="px-6 py-4 font-medium">對帳單編號</th>
                     <th className="px-6 py-4 font-medium">經銷商</th>
+                    <th className="px-6 py-4 font-medium">客戶名稱</th>
                     <th className="px-6 py-4 font-medium">發票總額</th>
                     <th className="px-6 py-4 font-medium">發票號碼</th>
+                    <th className="px-6 py-4 font-medium">發票日期</th>
+                    <th className="px-6 py-4 font-medium">建立日期</th>
                     <th className="px-6 py-4 font-medium">開立日期</th>
+              
                     <th className="px-6 py-4 font-medium">開立人</th>
                     <th className="px-6 py-4 font-medium">狀態</th>
                     <th className="px-6 py-4 font-medium">操作</th>
@@ -2694,10 +2775,15 @@
                     <tr key={row.id + "_" + idx} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-6 py-4 font-medium text-gray-900">{row.id}</td>
                       <td className="px-6 py-4 text-gray-700">{row.channel}</td>
+                      <td className="px-6 py-4 text-gray-700">{row.customerName || "-"}</td>
                       <td className="px-6 py-4 text-blue-600 font-medium">{formatMoney(row.amount)}</td>
                       <td className="px-6 py-4 font-mono text-gray-800">{row.invoiceNo || "-"}</td>
-                      <td className="px-6 py-4 text-gray-600">{row.date}</td>
-                      <td className="px-6 py-4 text-gray-600">{row.issuer}</td>
+                      <td className="px-6 py-4 text-gray-600">{(row.invoiceDateISO || "").replaceAll("-", "/") || "-"}</td>
+                      <td className="px-6 py-4 text-gray-600">{formatDateTime(row.createdAtISO)}</td>
+                      <td className="px-6 py-4 text-gray-600">{formatDateTime(row.draftSavedAtISO)}</td>
+                      <td className="px-6 py-4 text-gray-600">{row.status === "已開立" ? (row.date || "-") : "-"}</td>
+                      <td className="px-6 py-4 text-gray-600">{formatDateTime(row.issuedAtISO)}</td>
+                      <td className="px-6 py-4 text-gray-600">{row.status === "草稿" ? (row.draftBy || row.issuer || "-") : (row.issueBy || row.issuer || "-")}</td>
                       <td className="px-6 py-4">
                         {row.status === "草稿" ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
@@ -2825,7 +2911,7 @@
                 <div class="flex justify-between gap-4"><span class="text-gray-500">淨額</span><span id="baseNet" class="font-semibold text-blue-600"></span></div>
                 
                   <div class="flex justify-between gap-4"><span class="text-gray-500">調整項合計</span><span id="adjSum" class="font-medium"></span></div>
-                <div class="flex justify-between gap-4 items-start"><span class="text-gray-500 shrink-0">備註</span><textarea id="note" rows="2" class="border border-gray-300 rounded px-2 py-1 text-sm w-full focus:outline-none focus:border-blue-500 resize-y min-h-[2.5rem]" placeholder="備註..."></textarea></div>
+                <div class="flex justify-between gap-4 items-start"><span class="text-gray-500 shrink-0">發票備註</span><textarea id="note" rows="2" class="border border-gray-300 rounded px-2 py-1 text-sm w-full focus:outline-none focus:border-blue-500 resize-y min-h-[2.5rem]" placeholder="發票備註..."></textarea></div>
               </div>
             </div>
           </div>
@@ -2836,22 +2922,23 @@
                 <span id="linesSectionTitle">小計明細</span>
                 <button id="toggleLinesBtn" class="text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50">展開全部</button>
               </div>
-              <span id="linesSectionHint" class="text-xs text-gray-500">此分頁的編輯會回寫主視窗草稿</span>
+              
             </div>
             <div class="overflow-x-auto overflow-y-auto">
-              <table class="w-max min-w-[900px] text-left text-sm">
+              <table class="w-max min-w-[1250px] text-left text-sm">
                 <thead class="bg-white text-gray-500 sticky top-0 z-10 border-b border-gray-100">
                   <tr>
                     <th class="px-5 py-3 font-medium whitespace-nowrap">單據類型</th>
                     <th class="px-5 py-3 font-medium whitespace-nowrap">單號</th>
-                    <th class="px-5 py-3 font-medium whitespace-nowrap">通路商簡稱</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap">SKU</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">單價</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">本次結算數量</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">實際數量</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">剩餘可結</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">小計金額</th>
+                    <th class="px-5 py-3 font-medium whitespace-nowrap">商品名稱</th>
                     <th class="px-5 py-3 font-medium whitespace-nowrap">出貨日</th>
                     <th class="px-5 py-3 font-medium whitespace-nowrap">入庫日</th>
-                    <th class="px-5 py-3 font-medium whitespace-nowrap">SKU</th>
-                    <th class="px-5 py-3 font-medium whitespace-nowrap">商品名稱</th>
-                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">單價</th>
-                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">數量</th>
-                    <th class="px-5 py-3 font-medium whitespace-nowrap text-right">小計金額</th>
                   </tr>
                 </thead>
                 <tbody id="linetbody" class="divide-y divide-gray-100"></tbody>
@@ -2896,7 +2983,7 @@
                     <th class="px-5 py-3 font-medium">退貨數量</th>
                     <th class="px-5 py-3 font-medium">淨數量</th>
                     <th class="px-5 py-3 font-medium">淨額</th>
-                    <th class="px-5 py-3 font-medium">備註</th>
+                    
                   </tr>
                 </thead>
                 <tbody id="subtbody" class="divide-y divide-gray-100"></tbody>
@@ -2994,7 +3081,7 @@
       const modeBadge = document.getElementById('modeBadge');
       if (modeBadge) modeBadge.classList.toggle('hidden', !viewOnly);
       const linesTitle = document.getElementById('linesSectionTitle');
-      if (linesTitle) linesTitle.textContent = viewOnly ? '明細（檢視模式：版面與草稿相同，欄位唯讀）' : '明細（可編輯：單價/數量 → 自算小計）';
+      if (linesTitle) linesTitle.textContent = viewOnly ? '明細' : '明細（可編輯：單價/數量 → 自算小計）';
       const linesHint = document.getElementById('linesSectionHint');
       if (linesHint) linesHint.textContent = viewOnly ? '已開立，僅供檢視' : '此分頁的編輯會回寫主視窗草稿';
       const adjTitle = document.getElementById('adjSectionTitle');
@@ -3104,13 +3191,11 @@
             el.textContent = text;
             return el;
           };
+          const isTracked = normalizeDocType(r.docType) === '出貨' || normalizeDocType(r.docType) === '退貨';
+          const overLimit = isTracked && Math.abs(safeNumber(r.qty)) > safeNumber(r.availableQty);
           tr.appendChild(td('px-5 py-3 whitespace-nowrap', normalizeDocType(r.docType)));
           tr.appendChild(td('px-5 py-3 whitespace-nowrap font-mono', String(r.docNo || '')));
-          tr.appendChild(td('px-5 py-3 whitespace-nowrap', String(r.channelShort || '')));
-          tr.appendChild(td('px-5 py-3 whitespace-nowrap', String(r.shipDateISO || '')));
-          tr.appendChild(td('px-5 py-3 whitespace-nowrap', String(r.inDateISO || '')));
           tr.appendChild(td('px-5 py-3 whitespace-nowrap font-mono', String(r.sku || '')));
-          tr.appendChild(td('px-5 py-3', String(r.skuName || '')));
 
           const mkReadonlyInput = (widthCls, val) => {
             const el = document.createElement('input');
@@ -3125,6 +3210,7 @@
             return el;
           };
 
+          const amountCell = td('px-5 py-3 whitespace-nowrap text-right font-medium', fmtMoney(r.lineAmount || 0));
           if (viewOnly) {
             const tdPrice = document.createElement('td');
             tdPrice.className = 'px-5 py-2 whitespace-nowrap text-right';
@@ -3132,7 +3218,12 @@
             tr.appendChild(tdPrice);
             const tdQty = document.createElement('td');
             tdQty.className = 'px-5 py-2 whitespace-nowrap text-right';
-            tdQty.appendChild(mkReadonlyInput('w-20', r.qty ?? ''));
+            const roQty = mkReadonlyInput('w-20', r.qty ?? '');
+            if (overLimit) {
+              roQty.className = roQty.className.replace('border-gray-300', 'border-red-500') + ' bg-red-50 text-red-700';
+              roQty.title = '不可大於剩餘可結（' + safeNumber(r.availableQty) + '）';
+            }
+            tdQty.appendChild(roQty);
             tr.appendChild(tdQty);
           } else {
             const tdPrice = document.createElement('td');
@@ -3158,31 +3249,35 @@
             const tdQty = document.createElement('td');
             tdQty.className = 'px-5 py-2 whitespace-nowrap text-right';
             const iq = document.createElement('input');
-            iq.className = 'border border-gray-300 rounded px-2 py-1 text-sm w-20 text-right focus:outline-none focus:border-blue-500';
+            iq.className =
+              'border rounded px-2 py-1 text-sm w-20 text-right focus:outline-none ' +
+              (overLimit ? 'border-red-500 bg-red-50 text-red-700 focus:border-red-600' : 'border-gray-300 focus:border-blue-500');
             iq.value = String(r.qty ?? '');
             iq.setAttribute('inputmode', 'decimal');
+            if (overLimit) iq.title = '不可大於剩餘可結（' + safeNumber(r.availableQty) + '）';
             iq.addEventListener('input', (e) => {
-              let qv = safeNumber(e.target.value);
-              if (normalizeDocType(r.docType) === '出貨' || normalizeDocType(r.docType) === '退貨') {
-                const maxA = safeNumber(r.availableQty);
-                qv = Math.min(maxA, Math.max(0, Math.abs(qv)));
-                iq.value = String(qv);
-              }
+              const qv = safeNumber(e.target.value);
               r.qty = qv;
               r.lineAmount = Math.abs(safeNumber(r.unitPrice)) * Math.abs(safeNumber(r.qty));
-              const trEl = e.target.closest('tr');
-              if (trEl) {
-                const cells = trEl.querySelectorAll('td');
-                const last = cells[cells.length - 1];
-                if (last) last.textContent = fmtMoney(r.lineAmount || 0);
-              }
+              const nowOver = (normalizeDocType(r.docType) === '出貨' || normalizeDocType(r.docType) === '退貨') && Math.abs(safeNumber(r.qty)) > safeNumber(r.availableQty);
+              iq.className =
+                'border rounded px-2 py-1 text-sm w-20 text-right focus:outline-none ' +
+                (nowOver ? 'border-red-500 bg-red-50 text-red-700 focus:border-red-600' : 'border-gray-300 focus:border-blue-500');
+              if (nowOver) iq.title = '不可大於剩餘可結（' + safeNumber(r.availableQty) + '）';
+              else iq.removeAttribute('title');
+              amountCell.textContent = fmtMoney(r.lineAmount || 0);
               refreshFinancials();
             });
             tdQty.appendChild(iq);
             tr.appendChild(tdQty);
           }
 
-          tr.appendChild(td('px-5 py-3 whitespace-nowrap text-right font-medium', fmtMoney(r.lineAmount || 0)));
+          tr.appendChild(td('px-5 py-3 whitespace-nowrap text-right', String(safeNumber(r.originalQty))));
+          tr.appendChild(td('px-5 py-3 whitespace-nowrap text-right text-blue-700 font-medium', isTracked ? String(safeNumber(r.availableQty)) : '—'));
+          tr.appendChild(amountCell);
+          tr.appendChild(td('px-5 py-3', String(r.skuName || '')));
+          tr.appendChild(td('px-5 py-3 whitespace-nowrap', String(r.shipDate || r.shipDateISO || '')));
+          tr.appendChild(td('px-5 py-3 whitespace-nowrap', String(r.inDate || r.inDateISO || '')));
           tbody.appendChild(tr);
         }
       };
@@ -3365,8 +3460,25 @@
         };
       };
 
+      const hasInvalidQtyOverLimit = () => {
+        for (const ln of lines || []) {
+          const dt = normalizeDocType(ln.docType);
+          if (dt !== '出貨' && dt !== '退貨') continue;
+          const q = Math.abs(safeNumber(ln.qty));
+          const maxA = safeNumber(ln.availableQty);
+          const raw = ln.qty === null || ln.qty === undefined ? '' : String(ln.qty).trim();
+          if (raw && q > maxA) return { bad: true, line: ln, maxA };
+        }
+        return { bad: false };
+      };
+
       const sendSave = () => {
         if (!window.opener) { alert('找不到主視窗'); return false; }
+        const v = hasInvalidQtyOverLimit();
+        if (v.bad) {
+          alert('本次結算數量不可大於剩餘可結。\\n單號：' + (v.line?.docNo || '') + ' / SKU：' + (v.line?.sku || '') + ' / 剩餘可結：' + v.maxA);
+          return false;
+        }
         const built = buildPayload();
         window.opener.postMessage({
           type: 'DAS_SAVE_DRAFT',
@@ -3376,6 +3488,7 @@
           deductions: built.deductions,
           adjustments: adjustments || [],
           invoiceDate: invoiceDateInputEl ? (invoiceDateInputEl.value || '') : (data.invoiceDate || ''),
+          issuer: data.issuer || '',
           notifyEmail: notifyEmailEl.value || '',
           note: noteEl.value || '',
         }, '*');
@@ -3395,6 +3508,11 @@
         if (issueBtn) {
           issueBtn.addEventListener('click', () => {
             if (!window.opener) { alert('找不到主視窗'); return; }
+            const v = hasInvalidQtyOverLimit();
+            if (v.bad) {
+              alert('本次結算數量不可大於剩餘可結。\\n單號：' + (v.line?.docNo || '') + ' / SKU：' + (v.line?.sku || '') + ' / 剩餘可結：' + v.maxA);
+              return;
+            }
             const built = buildPayload();
             window.opener.postMessage({
               type: 'DAS_ISSUE_INVOICE_WITH_DATA',
@@ -3404,6 +3522,7 @@
               deductions: built.deductions,
               adjustments: adjustments || [],
               invoiceDate: invoiceDateInputEl ? (invoiceDateInputEl.value || '') : (data.invoiceDate || ''),
+              issuer: data.issuer || '',
               notifyEmail: notifyEmailEl.value || '',
               note: noteEl.value || '',
             }, '*');
@@ -3435,7 +3554,7 @@
                             }}
                             className="text-blue-600 hover:text-blue-800 font-medium text-sm"
                           >
-                            {row.status === "草稿" ? "檢視/編輯" : "檢視"}
+                            檢視／編輯
                           </button>
                         </div>
                       </td>
@@ -3635,7 +3754,7 @@
                           <th className="px-5 py-3 font-medium">出貨金額</th>
                           <th className="px-5 py-3 font-medium">退貨金額</th>
                           <th className="px-5 py-3 font-medium text-blue-600">淨額</th>
-                          <th className="px-5 py-3 font-medium">備註</th>
+                          <th className="px-5 py-3 font-medium">發票備註</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
